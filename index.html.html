@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SISTEM PENGURUSAN CUTI APC</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 font-sans antialiased text-slate-800">
+
+    <div class="max-w-7xl mx-auto p-4 md:p-6">
+        <!-- Header Utama -->
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800">SISTEM PENGURUSAN CUTI STAF</h1>
+                <p class="text-sm text-slate-500">AutoPrima College - Pautan Rasmi</p>
+            </div>
+            <!-- Tukar Peranan Pengguna (Simulasi) -->
+            <div class="w-full md:w-auto bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Peranan Semasa:</label>
+                <select id="userRole" onchange="switchRole()" class="w-full md:w-auto border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="staff">Staf / Pemohon</option>
+                    <option value="koordinator">Koordinator (Sokongan)</option>
+                    <option value="pengarah">Pengarah Operasi (Kelulusan)</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Kad Baki Cuti -->
+        <section class="mb-8 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-slate-800 mb-4">Baki Cuti Semasa (Hari)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                    <label class="block text-xs font-bold text-blue-700 uppercase mb-1">Cuti Tahunan</label>
+                    <input type="number" id="balAnnual" value="14" class="w-full font-bold text-2xl text-blue-900 bg-white border border-blue-200 rounded px-3 py-1" readonly>
+                </div>
+                <div class="bg-amber-50 p-4 rounded-lg border border-amber-100">
+                    <label class="block text-xs font-bold text-amber-700 uppercase mb-1">Cuti Kecemasan</label>
+                    <input type="number" id="balEmergency" value="3" class="w-full font-bold text-2xl text-amber-900 bg-white border border-amber-200 rounded px-3 py-1" readonly>
+                </div>
+                <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
+                    <label class="block text-xs font-bold text-emerald-700 uppercase mb-1">Time Off</label>
+                    <input type="number" id="balTimeoff" value="2" class="w-full font-bold text-2xl text-emerald-900 bg-white border border-emerald-200 rounded px-3 py-1" readonly>
+                </div>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Borang Mohon Cuti -->
+            <div id="applySection" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-1">
+                <h2 class="text-lg font-bold text-slate-800 mb-4">Mohon Cuti Baru</h2>
+                <form id="leaveForm" onsubmit="submitLeave(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Nama Pemohon</label>
+                        <input type="text" id="staffName" value="Ahmad Ali" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Jawatan</label>
+                        <select id="applicantRole" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                            <option value="Staf">Staf / Tenaga Pengajar</option>
+                            <option value="Koordinator">Koordinator / Ketua Unit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Jenis Cuti</label>
+                        <select id="leaveType" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                            <option value="Cuti Tahunan">Cuti Tahunan</option>
+                            <option value="Cuti Kecemasan">Cuti Kecemasan</option>
+                            <option value="Time Off">Time Off</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Mula</label>
+                            <input type="date" id="startDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Tamat</label>
+                            <input type="date" id="endDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Sebab / Alasan</label>
+                        <textarea id="reason" rows="3" required placeholder="Nyatakan sebab..." class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg text-sm">
+                        Hantar Permohonan
+                    </button>
+                </form>
+            </div>
+
+            <!-- Jadual Permohonan -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
+                <h2 class="text-lg font-bold text-slate-800 mb-4">Senarai Permohonan Cuti</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200 text-slate-600">
+                                <th class="p-3 font-semibold">Pemohon & Jenis</th>
+                                <th class="p-3 font-semibold">Tarikh & Tempoh</th>
+                                <th class="p-3 font-semibold">Alasan</th>
+                                <th class="p-3 font-semibold">Status</th>
+                                <th class="p-3 font-semibold text-center">Tindakan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaveTableBody" class="divide-y divide-slate-100">
+                            <tr><td colspan="5" class="p-4 text-center text-slate-400">Memuatkan data...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifikasi Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-3 rounded-lg shadow-lg text-sm transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <span id="toastMessage">Notifikasi</span>
+    </div>
+
+    <!-- Logik & Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // ==========================================
+        // MASUKKAN FIREBASE CONFIG ANDA DI SINI NANTI
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "GANTI_API_KEY_ANDA",
+            authDomain: "projek-anda.firebaseapp.com",
+            projectId: "projek-anda",
+            storageBucket: "projek-anda.appspot.com",
+            messagingSenderId: "ID_ANDA",
+            appId: "APP_ID_ANDA"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let leaveRequests = [];
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+
+        function calculateDays(start, end) {
+            const diff = Math.abs(new Date(end) - new Date(start));
+            const days = Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1;
+            return isNaN(days) || days <= 0 ? 1 : days;
+        }
+
+        // Ambil data secara real-time dari Firebase
+        onSnapshot(collection(db, "leaveRequests"), (snapshot) => {
+            leaveRequests = [];
+            snapshot.forEach((docSnap) => {
+                leaveRequests.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            renderTable();
+        });
+
+        window.renderTable = function() {
+            const tbody = document.getElementById('leaveTableBody');
+            const currentRole = document.getElementById('userRole').value;
+            tbody.innerHTML = "";
+
+            if (leaveRequests.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Tiada permohonan cuti.</td></tr>`;
+                return;
+            }
+
+            leaveRequests.forEach((req) => {
+                let badge = `<span class="px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 rounded-full">${req.status}</span>`;
+                if (req.status === "Disahkan (Lulus)") badge = `<span class="px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full">Lulus</span>`;
+                if (req.status === "Disokong") badge = `<span class="px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 rounded-full">Disokong</span>`;
+                if (req.status === "Ditolak") badge = `<span class="px-2.5 py-1 text-xs font-semibold bg-rose-100 text-rose-800 rounded-full">Ditolak</span>`;
+
+                let action = `<span class="text-xs text-slate-400">Tiada tindakan</span>`;
+
+                if (currentRole === "koordinator") {
+                    if (req.status === "Menunggu Sokongan") {
+                        action = `<button onclick="updateStatus('${req.id}', 'Disokong')" class="bg-blue-600 text-white px-2 py-1 rounded text-xs">Sokong</button>
+                                  <button onclick="updateStatus('${req.id}', 'Ditolak')" class="bg-rose-600 text-white px-2 py-1 rounded text-xs">Tolak</button>`;
+                    }
+                } else if (currentRole === "pengarah") {
+                    if (req.status === "Disokong" || req.status === "Menunggu Kelulusan (Pengarah)") {
+                        action = `<button onclick="updateStatus('${req.id}', 'Disahkan (Lulus)')" class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">Luluskan</button>
+                                  <button onclick="updateStatus('${req.id}', 'Ditolak')" class="bg-rose-600 text-white px-2 py-1 rounded text-xs">Tolak</button>`;
+                    }
+                }
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-3"><div class="font-bold">${req.name}</div><div class="text-xs text-blue-600">${req.type}</div></td>
+                        <td class="p-3 text-xs"><div>${req.start} - ${req.end}</div><div class="font-bold">(${req.days} Hari)</div></td>
+                        <td class="p-3 text-slate-600">${req.reason}</td>
+                        <td class="p-3">${badge}</td>
+                        <td class="p-3 text-center space-x-1">${action} <button onclick="deleteReq('${req.id}')" class="bg-slate-500 text-white px-2 py-1 rounded text-xs">Padam</button></td>
+                    </tr>
+                `;
+            });
+        }
+
+        window.submitLeave = async function(e) {
+            e.preventDefault();
+            const name = document.getElementById('staffName').value;
+            const role = document.getElementById('applicantRole').value;
+            const type = document.getElementById('leaveType').value;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const reason = document.getElementById('reason').value;
+            const days = calculateDays(start, end);
+            const status = (role === "Koordinator") ? "Menunggu Kelulusan (Pengarah)" : "Menunggu Sokongan";
+
+            await addDoc(collection(db, "leaveRequests"), { name, role, type, start, end, reason, status, days, createdAt: new Date() });
+            document.getElementById('leaveForm').reset();
+            showToast("Permohonan berjaya dihantar!");
+        }
+
+        window.updateStatus = async function(id, newStatus) {
+            await updateDoc(doc(db, "leaveRequests", id), { status: newStatus });
+            showToast("Status dikemas kini!");
+        }
+
+        window.deleteReq = async function(id) {
+            if (confirm("Padam permohonan ini?")) {
+                await deleteDoc(doc(db, "leaveRequests", id));
+                showToast("Permohonan dipadam.");
+            }
+        }
+
+        window.switchRole = function() {
+            renderTable();
+        }
+    </script>
+</body>
+</html>
