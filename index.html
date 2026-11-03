@@ -76,8 +76,8 @@
                 currentName = document.getElementById('staffName').value.trim();
             }
 
-            // Jika nama kosong atau tiada dalam rekod, beri nilai default (Contoh: 14, 3, 2)
-            const defaultBal = { annual: 14, emergency: 3, timeoff: 2 };
+            // Jika nama kosong atau tiada dalam rekod, beri nilai default (Contoh: 20, 10, 12)
+            const defaultBal = { annual: 20, emergency: 10, timeoff: 12 };
             const bal = (currentName && staffBalances[currentName]) ? staffBalances[currentName] : defaultBal;
 
             document.getElementById('balAnnual').value = bal.annual;
