@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Permohonan Cuti - Jabatan Elektrikal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Konfigurasi Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyCrHzGaqiYJ7mReZaRnm1qKRZQ_G645JdQ",
+            authDomain: "sistem-permohonan-cuti-staf.firebaseapp.com",
+            projectId: "sistem-permohonan-cuti-staf",
+            storageBucket: "sistem-permohonan-cuti-staf.firebasestorage.app",
+            messagingSenderId: "240744214067",
+            appId: "1:240744214067:web:d2ac50a11ee079d2e27d46",
+            measurementId: "G-XMHCCKL4KY"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let leaveRequests = [];
+        let uploadedFileBase64 = "";
+
+        // Pengendali muat naik fail (maksimum 1MB)
+        window.handleFileUpload = function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.size > 1024 * 1024) {
+                    alert("Saiz fail terlalu besar. Sila pilih fail kurang dari 1MB.");
+                    event.target.value = "";
+                    uploadedFileBase64 = "";
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(e) { uploadedFileBase64 = e.target.result; };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Pengiraan bilangan hari cuti
+        window.calculateDays = function(start, end) {
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            const diffTime = Math.abs(endDate - startDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            return isNaN(diffDays) || diffDays <= 0 ? 1 : diffDays;
+        }
+
+        // Paparan Notifikasi Toast
+        window.showToast = function(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').innerText = message;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
+        }
+
+        // Tapisan mengikut nama staf & carian baki cuti
+        window.handleStaffFilter = async function() {
+            const filterNameInput = document.getElementById('filterStaffName');
+            const balanceCard = document.getElementById('balanceCard');
+            const staffName = filterNameInput ? filterNameInput.value.trim().toUpperCase() : "";
+
+            if (staffName === "") {
+                balanceCard.classList.add('hidden');
+                window.renderTable();
+                return;
+            }
+
+            balanceCard.classList.remove('hidden');
+            document.getElementById('displayStaffIdTitle').innerText = staffName;
+
+            const balRef = doc(db, "staffBalances_elektrikal", staffName);
+            const balSnap = await getDoc(balRef);
+
+            if (balSnap.exists()) {
+                const bal = balSnap.data();
+                document.getElementById('balAnnual').value = bal.annual ?? 20;
+                document.getElementById('balEmergency').value = bal.emergency ?? 10;
+                document.getElementById('balTimeoff').value = bal.timeoff ?? 12;
+                document.getElementById('balUnpaid').value = bal.unpaid ?? 0;
+            } else {
+                const defaultBal = { name: staffName, annual: 20, emergency: 10, timeoff: 12, unpaid: 0 };
+                await setDoc(balRef, defaultBal);
+                document.getElementById('balAnnual').value = defaultBal.annual;
+                document.getElementById('balEmergency').value = defaultBal.emergency;
+                document.getElementById('balTimeoff').value = defaultBal.timeoff;
+                document.getElementById('balUnpaid').value = defaultBal.unpaid;
+            }
+            window.renderTable();
+        }
+
+        // Kemaskini baki cuti staf dalam Firestore
+        window.updateBalanceInDB = async function() {
+            const filterNameInput = document.getElementById('filterStaffName');
+            const staffName = filterNameInput ? filterNameInput.value.trim().toUpperCase() : "";
+            if (!staffName) { window.showToast("Sila masukkan nama staf di ruangan tapisan terlebih dahulu."); return; }
+
+            const annual = parseInt(document.getElementById('balAnnual').value) || 0;
+            const emergency = parseInt(document.getElementById('balEmergency').value) || 0;
+            const timeoff = parseInt(document.getElementById('balTimeoff').value) || 0;
+            const unpaid = parseInt(document.getElementById('balUnpaid').value) || 0;
+
+            try {
+                const balRef = doc(db, "staffBalances_elektrikal", staffName);
+                await setDoc(balRef, { name: staffName, annual, emergency, timeoff, unpaid });
+                window.showToast(`Baki cuti staf [${staffName}] berjaya disimpan!`);
+            } catch (e) { console.error("Ralat:", e); }
+        }
+
+        // Rendisi Jadual Permohonan Cuti
+        window.renderTable = function() {
+            const tbody = document.getElementById('leaveTableBody');
+            const currentRole = document.getElementById('userRole').value;
+            const filterNameInput = document.getElementById('filterStaffName');
+            const searchName = filterNameInput ? filterNameInput.value.trim().toLowerCase() : "";
+            
+            tbody.innerHTML = "";
+            let filteredRequests = [];
+
+            if (currentRole === "staff") {
+                if (!searchName) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 italic">Sila masukkan <strong>Nama Penuh Anda</strong> di ruangan tapisan sebelah atas untuk melihat rekod permohonan anda sendiri.</td></tr>`;
+                    return;
+                }
+
+                filteredRequests = leaveRequests.filter(req => {
+                    const reqName = (req.name || "").trim().toLowerCase();
+                    return reqName === searchName;
+                });
+
+                if (filteredRequests.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-rose-500 font-medium">Tiada permohonan cuti dijumpai atas nama [ ${filterNameInput.value.trim()} ]. Sila pastikan ejaan nama adalah tepat.</td></tr>`;
+                    return;
+                }
+            } else {
+                filteredRequests = leaveRequests;
+            }
+
+            if (filteredRequests.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Tiada permohonan cuti ditemui dalam sistem.</td></tr>`;
+                return;
+            }
+
+            filteredRequests.forEach((req) => {
+                let statusBadge = "";
+                if (req.status === "Disahkan (Lulus)") statusBadge = `<span class="px-2 py-1 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full">Disahkan (Lulus)</span>`;
+                else if (req.status === "Disokong") statusBadge = `<span class="px-2 py-1 text-xs font-semibold bg-blue-100 text-blue-800 rounded-full">Disokong (Selesai Koordinator)</span>`;
+                else if (req.status === "Ditolak") statusBadge = `<span class="px-2 py-1 text-xs font-semibold bg-rose-100 text-rose-800 rounded-full">Ditolak</span>`;
+                else if (req.status === "Menunggu Kelulusan (Pengarah)") statusBadge = `<span class="px-2 py-1 text-xs font-semibold bg-purple-100 text-purple-800 rounded-full">Menunggu Pengarah (Koordinator)</span>`;
+                else statusBadge = `<span class="px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-800 rounded-full">Menunggu Sokongan Koordinator</span>`;
+
+                let attachmentLink = req.attachment ? `<a href="${req.attachment}" target="_blank" class="block mt-1 text-xs text-blue-600 underline font-semibold">📁 Lihat MC/Surat</a>` : `<span class="block mt-1 text-xs text-slate-400 italic">Tiada lampiran</span>`;
+                let directorCommentSection = req.directorComment ? `<div class="mt-2 p-2 bg-slate-50 border rounded text-xs text-slate-700"><strong>Ulasan Pengarah:</strong> ${req.directorComment}</div>` : "";
+
+                let actionButtons = `<div class="flex justify-center space-x-1"><button onclick="openEditModal('${req.id}')" class="bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded text-xs font-medium">Edit</button><button onclick="deleteRequest('${req.id}')" class="bg-slate-600 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-medium">Padam</button></div>`;
+
+                if (currentRole === "koordinator") {
+                    if (req.role === "Koordinator / Ketua Unit") {
+                        actionButtons = `<span class="text-xs text-slate-400 italic">Permohonan Sendiri</span>`;
+                    } else if (req.status === "Menunggu Sokongan") {
+                        actionButtons = `<div class="flex justify-center space-x-1"><button onclick="updateStatusWithComment('${req.id}', 'Disokong')" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs font-medium">Sokong</button><button onclick="updateStatusWithComment('${req.id}', 'Ditolak')" class="bg-rose-600 hover:bg-rose-700 text-white px-2 py-1 rounded text-xs font-medium">Tolak</button><button onclick="openEditModal('${req.id}')" class="bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded text-xs font-medium">Edit</button></div>`;
+                    } else { actionButtons = `<span class="text-xs text-slate-400 italic">Tindakan Selesai</span>`; }
+                } else if (currentRole === "pengarah") {
+                    if (req.status === "Disokong" || req.status === "Menunggu Kelulusan (Pengarah)") {
+                        actionButtons = `<div class="flex flex-col space-y-2 items-center"><input type="text" id="comment_${req.id}" placeholder="Masukkan ulasan/komen..." class="border border-slate-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500"><div class="flex space-x-1"><button onclick="updateStatusWithComment('${req.id}', 'Disahkan (Lulus)')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded text-xs font-medium">Lulus</button><button onclick="updateStatusWithComment('${req.id}', 'Ditolak')" class="bg-rose-600 hover:bg-rose-700 text-white px-2 py-1 rounded text-xs font-medium">Tolak</button></div></div>`;
+                    } else if (req.status === "Menunggu Sokongan") {
+                        actionButtons = `<span class="text-xs text-slate-400 italic">Menunggu Koordinator</span>`;
+                    } else { actionButtons = `<div class="flex justify-center space-x-1 items-center"><span class="text-xs text-slate-400 italic mr-1">Keputusan Akhir</span><button onclick="deleteRequest('${req.id}')" class="bg-slate-600 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-medium">Padam</button></div>`; }
+                }
+
+                tbody.innerHTML += `<tr class="hover:bg-slate-50"><td class="p-3"><div class="font-bold text-slate-800">${req.name}</div><div class="text-xs text-blue-600 font-medium">${req.type} (${req.role || 'Staf / Pegawai Penilai'})</div></td><td class="p-3 text-xs text-slate-600"><div>${req.start} hingga ${req.end}</div><div class="font-bold text-slate-700">(${req.days} Hari)</div></td><td class="p-3 text-slate-600"><div>${req.reason}</div>${attachmentLink}${directorCommentSection}</td><td class="p-3">${statusBadge}</td><td class="p-3 text-center">${actionButtons}</td></tr>`;
+            });
+        }
+
+        // Menghantar permohonan cuti baharu
+        window.submitLeave = async function(event) {
+            event.preventDefault();
+            const name = document.getElementById('staffName').value.trim();
+            const role = document.getElementById('applicantRole').value;
+            const type = document.getElementById('leaveType').value;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const reason = document.getElementById('reason').value;
+            const days = window.calculateDays(start, end);
+            const attachment = uploadedFileBase64;
+            const initialStatus = (role === "Koordinator / Ketua Unit") ? "Menunggu Kelulusan (Pengarah)" : "Menunggu Sokongan";
+
+            try {
+                const balKey = name.toUpperCase();
+                const balRef = doc(db, "staffBalances_elektrikal", balKey);
+                const balSnap = await getDoc(balRef);
+                if (!balSnap.exists()) await setDoc(balRef, { name: name, annual: 20, emergency: 10, timeoff: 12, unpaid: 0 });
+
+                await addDoc(collection(db, "leaveRequests_elektrikal"), { name, role, type, start, end, reason, attachment, directorComment: "", status: initialStatus, days, createdAt: new Date() });
+                document.getElementById('leaveForm').reset();
+                uploadedFileBase64 = "";
+                window.showToast("Permohonan cuti berjaya dihantar!");
+            } catch (e) { window.showToast("Gagal menghantar permohonan."); }
+        }
+
+        // Kemaskini status permohonan dan tolak baki cuti jika diluluskan
+        window.updateStatusWithComment = async function(id, newStatus) {
+            try {
+                const targetReq = leaveRequests.find(r => r.id === id);
+                if (!targetReq) return;
+                const commentInput = document.getElementById(`comment_${id}`);
+                const directorComment = commentInput ? commentInput.value.trim() : (targetReq.directorComment || "");
+
+                if (newStatus === "Disahkan (Lulus)" && targetReq.status !== "Disahkan (Lulus)") {
+                    const staffName = targetReq.name;
+                    if (staffName) {
+                        const balRef = doc(db, "staffBalances_elektrikal", staffName.toUpperCase());
+                        const balSnap = await getDoc(balRef);
+                        let data = balSnap.exists() ? balSnap.data() : { annual: 20, emergency: 10, timeoff: 12, unpaid: 0 };
+                        let annual = data.annual ?? 20, emergency = data.emergency ?? 10, timeoff = data.timeoff ?? 12, unpaid = data.unpaid ?? 0;
+
+                        if (targetReq.type === "Cuti Tahunan") annual = Math.max(0, annual - targetReq.days);
+                        else if (targetReq.type === "Cuti Kecemasan") emergency = Math.max(0, emergency - targetReq.days);
+                        else if (targetReq.type === "Time Off") timeoff = Math.max(0, timeoff - targetReq.days);
+                        else if (targetReq.type === "Cuti Tanpa Gaji") unpaid += targetReq.days;
+
+                        await setDoc(balRef, { ...data, annual, emergency, timeoff, unpaid });
+                    }
+                }
+                await updateDoc(doc(db, "leaveRequests_elektrikal", id), { status: newStatus, directorComment });
+                window.showToast(`Status dikemas kini: ${newStatus}`);
+            } catch (e) { console.error(e); }
+        }
+
+        // Memadam rekod permohonan
+        window.deleteRequest = async function(id) {
+            if (confirm("Adakah anda pasti mahu memadam permohonan ini?")) {
+                try {
+                    await deleteDoc(doc(db, "leaveRequests_elektrikal", id));
+                    window.showToast("Permohonan berjaya dipadam.");
+                } catch (e) { console.error(e); }
+            }
+        }
+
+        // Buka modal sunting permohonan
+        window.openEditModal = function(id) {
+            const req = leaveRequests.find(item => item.id === id);
+            if (!req) return;
+            document.getElementById('editIndex').value = req.id;
+            document.getElementById('editName').value = req.name;
+            document.getElementById('editApplicantRole').value = req.role || "Staf / Pegawai Penilai";
+            document.getElementById('editType').value = req.type;
+            document.getElementById('editStartDate').value = req.start;
+            document.getElementById('editEndDate').value = req.end;
+            document.getElementById('editReason').value = req.reason;
+            document.getElementById('editModal').classList.remove('hidden');
+        }
+
+        window.closeEditModal = function() { document.getElementById('editModal').classList.add('hidden'); }
+
+        // Simpan perubahan suntingan
+        window.saveEdit = async function(event) {
+            event.preventDefault();
+            const id = document.getElementById('editIndex').value;
+            const start = document.getElementById('editStartDate').value;
+            const end = document.getElementById('editEndDate').value;
+            const newDays = window.calculateDays(start, end);
+            try {
+                await updateDoc(doc(db, "leaveRequests_elektrikal", id), {
+                    name: document.getElementById('editName').value,
+                    role: document.getElementById('editApplicantRole').value,
+                    type: document.getElementById('editType').value,
+                    start, end, reason: document.getElementById('editReason').value, days: newDays
+                });
+                window.closeEditModal();
+                window.showToast("Maklumat permohonan dikemas kini!");
+            } catch (e) { console.error(e); }
+        }
+
+        // Penukaran peranan (dengan perlindungan kata laluan)
+        window.switchRole = function() {
+            const roleSelect = document.getElementById('userRole');
+            const role = roleSelect.value;
+            const applySection = document.getElementById('applySection');
+            const filterContainer = document.getElementById('filterContainer');
+            const balanceCard = document.getElementById('balanceCard');
+
+            if (!window.previousRole) {
+                window.previousRole = "staff";
+            }
+
+            const PASS_KOORDINATOR = "K";
+            const PASS_PENGARAH = "P";
+
+            if (role === "koordinator") {
+                const inputPass = prompt("Sila masukkan Kata Laluan Koordinator (K):");
+                if (inputPass !== PASS_KOORDINATOR) {
+                    alert("Kata laluan salah! Anda tidak dibenarkan mengakses peranan ini.");
+                    roleSelect.value = window.previousRole;
+                    return;
+                }
+            } else if (role === "pengarah") {
+                const inputPass = prompt("Sila masukkan Kata Laluan Pengarah Operasi (P):");
+                if (inputPass !== PASS_PENGARAH) {
+                    alert("Kata laluan salah! Anda tidak dibenarkan mengakses peranan ini.");
+                    roleSelect.value = window.previousRole;
+                    return;
+                }
+            }
+
+            window.previousRole = role;
+
+            if (role === "staff") { 
+                applySection.classList.remove('opacity-50', 'pointer-events-none'); 
+                filterContainer.classList.remove('hidden'); 
+            } else { 
+                applySection.classList.add('opacity-50', 'pointer-events-none'); 
+                filterContainer.classList.add('hidden'); 
+                balanceCard.classList.add('hidden'); 
+            }
+            window.renderTable();
+        }
+
+        // Pendengar masa nyata (Realtime listener) dari Firebase
+        window.addEventListener('DOMContentLoaded', () => {
+            onSnapshot(collection(db, "leaveRequests_elektrikal"), (snapshot) => {
+                leaveRequests = [];
+                snapshot.forEach((docItem) => leaveRequests.push({ id: docItem.id, ...docItem.data() }));
+                window.renderTable();
+            });
+        });
+    </script>
+</head>
+<body class="bg-slate-100 font-sans antialiased text-slate-800">
+    <div class="max-w-7xl mx-auto p-4 md:p-6">
+        <!-- Tajuk utama sistem -->
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200 gap-4">
+            <div class="flex items-center space-x-4">
+                <div class="bg-white p-2 rounded-lg border border-slate-100 shadow-sm flex items-center justify-center">
+                    <img src="autoprima_logo.jpg" alt="AutoPrima College Logo" class="h-14 w-auto object-contain">
+                </div>
+                <div>
+                    <h1 class="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">SISTEM PERMOHONAN CUTI STAF</h1>
+                    <p class="text-xs text-slate-500 font-bold uppercase tracking-wider">JABATAN ELEKTRIKAL</p>
+                </div>
+            </div>
+            <div class="w-full md:w-auto bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Peranan Semasa (Pilih):</label>
+                <select id="userRole" onchange="switchRole()" class="w-full md:w-auto border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="staff">Staf / Pemohon</option>
+                    <option value="koordinator">Koordinator/Ketua Unit (Sokongan Staf)</option>
+                    <option value="pengarah">Pengarah Operasi (Pengesahan Akhir)</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Kad Baki Cuti Staf -->
+        <section id="balanceCard" class="mb-8 bg-white p-6 rounded-xl shadow-sm border border-slate-200 hidden">
+            <h2 class="text-lg font-bold text-slate-800 mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                <span>BAKI CUTI STAF: <span id="displayStaffIdTitle" class="text-blue-600"></span></span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-100"><label class="block text-xs font-bold text-blue-700 uppercase mb-1">Cuti Tahunan</label><input type="number" id="balAnnual" onchange="updateBalanceInDB()" class="w-full font-bold text-2xl text-blue-900 bg-white border border-blue-200 rounded px-3 py-1"></div>
+                <div class="bg-amber-50 p-4 rounded-lg border border-amber-100"><label class="block text-xs font-bold text-amber-700 uppercase mb-1">Cuti Kecemasan</label><input type="number" id="balEmergency" onchange="updateBalanceInDB()" class="w-full font-bold text-2xl text-amber-900 bg-white border border-amber-200 rounded px-3 py-1"></div>
+                <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-100"><label class="block text-xs font-bold text-emerald-700 uppercase mb-1">Time Off</label><input type="number" id="balTimeoff" onchange="updateBalanceInDB()" class="w-full font-bold text-2xl text-emerald-900 bg-white border border-emerald-200 rounded px-3 py-1"></div>
+                <div class="bg-rose-50 p-4 rounded-lg border border-rose-100"><label class="block text-xs font-bold text-rose-700 uppercase mb-1">Tanpa Gaji</label><input type="number" id="balUnpaid" onchange="updateBalanceInDB()" class="w-full font-bold text-2xl text-rose-900 bg-white border border-emerald-200 rounded px-3 py-1"></div>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Borang Permohonan Cuti -->
+            <div id="applySection" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-1">
+                <h2 class="text-lg font-bold text-slate-800 mb-4">MOHON CUTI BARU</h2>
+                <form id="leaveForm" onsubmit="submitLeave(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Nama Pemohon</label>
+                        <input type="text" id="staffName" placeholder="Nama penuh..." required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Jawatan Pemohon</label>
+                        <select id="applicantRole" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Staf / Pegawai Penilai">Staf / Pegawai Penilai</option>
+                            <option value="Koordinator / Ketua Unit">Koordinator / Ketua Unit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Jenis Cuti</label>
+                        <select id="leaveType" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Cuti Tahunan">Cuti Tahunan</option>
+                            <option value="Cuti Kecemasan">Cuti Kecemasan</option>
+                            <option value="Time Off">Time Off</option>
+                            <option value="Cuti Tanpa Gaji">Cuti Tanpa Gaji</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Mula</label>
+                            <input type="date" id="startDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Tamat</label>
+                            <input type="date" id="endDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Sebab / Alasan</label>
+                        <textarea id="reason" rows="2" required placeholder="Nyatakan sebab permohonan..." class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Muat Naik MC / Surat</label>
+                        <input type="file" id="attachmentFile" accept="image/*,application/pdf" onchange="handleFileUpload(event)" class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg text-sm transition duration-150">
+                        Hantar Permohonan
+                    </button>
+                </form>
+            </div>
+
+            <!-- Senarai Rekod Permohonan Cuti -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-2">
+                    <h2 class="text-lg font-bold text-slate-800">SENARAI PERMOHONAN CUTI</h2>
+                    <div id="filterContainer" class="w-full md:w-auto flex items-center space-x-2">
+                        <label class="text-xs font-semibold text-slate-600">Semak Rekod (Taip Nama Penuh Anda):</label>
+                        <input type="text" id="filterStaffName" placeholder="Nama penuh anda..." oninput="handleStaffFilter()" class="border border-slate-300 rounded-lg px-3 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-48">
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200 text-slate-600">
+                                <th class="p-3 font-semibold">Nama Staf</th>
+                                <th class="p-3 font-semibold">Tarikh & Tempoh</th>
+                                <th class="p-3 font-semibold">Alasan & Ulasan</th>
+                                <th class="p-3 font-semibold">Status</th>
+                                <th class="p-3 font-semibold text-center">Tindakan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaveTableBody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Suntingan (Edit) -->
+    <div id="editModal" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+            <h3 class="text-lg font-bold text-slate-800 mb-4">Sunting Permohonan Cuti</h3>
+            <form onsubmit="saveEdit(event)" class="space-y-4">
+                <input type="hidden" id="editIndex">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Nama Staff APC</label>
+                    <input type="text" id="editName" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Jawatan Staff</label>
+                    <select id="editApplicantRole" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="Staf / Pegawai Penilai">Staf / Pegawai Penilai</option>
+                        <option value="Koordinator / Ketua Unit">Koordinator / Ketua Unit</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Jenis Cuti</label>
+                    <select id="editType" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="Cuti Tahunan">Cuti Tahunan</option>
+                        <option value="Cuti Kecemasan">Cuti Kecemasan</option>
+                        <option value="Time Off">Time Off</option>
+                        <option value="Cuti Tanpa Gaji">Cuti Tanpa Gaji</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Mula</label>
+                        <input type="date" id="editStartDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Tarikh Tamat</label>
+                        <input type="date" id="editEndDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Sebab / Alasan</label>
+                    <textarea id="editReason" rows="2" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeEditModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Batal</button>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Simpan Perubahan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notifikasi Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-3 rounded-lg shadow-lg text-sm transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <span id="toastMessage">Mesej Notifikasi</span>
+    </div>
+</body>
+</html>
